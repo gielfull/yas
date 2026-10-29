@@ -1,0 +1,159 @@
+name: YAS
+options:
+  bundleIdPrefix: com.gful
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+packages:
+  # Local package, shared by the app and the filter extension (models, XPC
+  # protocols, rule engine). Owns its own tests.
+  YASShared:
+    path: Shared
+  # SQLite history. App target only; the extension stays dependency-free.
+  GRDB:
+    url: https://github.com/groue/GRDB.swift
+    from: "7.11.1"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    # Miguel De Leon (Developer ID Application: 3KTKRZUTXA). Single source of
+    # truth for every target. Debug stays ad-hoc ("-") until the App IDs, app
+    # group and Developer ID provisioning profiles exist.
+    DEVELOPMENT_TEAM: "3KTKRZUTXA"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    # Required for notarization. On in every configuration so runtime
+    # restrictions show up during development, not on release day.
+    ENABLE_HARDENED_RUNTIME: YES
+    MARKETING_VERSION: "0.1.0"
+    # Shared by app and extension. Bump on every build that is installed:
+    # macOS may keep running an old system extension if CFBundleVersion
+    # does not change.
+    CURRENT_PROJECT_VERSION: "1"
+  configs:
+    Release:
+      CODE_SIGN_IDENTITY: "Developer ID Application"
+      OTHER_CODE_SIGN_FLAGS: "--timestamp"
+
+targets:
+  YAS:
+    type: application
+    platform: macOS
+    sources:
+      - path: YAS
+    dependencies:
+      - package: YASShared
+        product: YASShared
+      - package: GRDB
+        product: GRDB
+      # Embedded at Contents/Library/SystemExtensions (XcodeGen picks the
+      # SystemExtensions copy destination for system-extension targets).
+      - target: YASFilter
+        embed: true
+      - sdk: SystemExtensions.framework
+      - sdk: NetworkExtension.framework
+    entitlements:
+      path: YAS/Resources/YAS.entitlements
+      properties:
+        com.apple.developer.system-extension.install: true
+        com.apple.developer.networking.networkextension:
+          - content-filter-provider-systemextension
+        com.apple.security.application-groups:
+          - group.com.gful.yas
+    info:
+      path: YAS/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: YAS
+        CFBundleName: YAS
+        NSHumanReadableCopyright: "YAS — Yet Another Shield"
+        CFBundleIconName: AppIcon
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSMinimumSystemVersion: "14.0"
+        LSApplicationCategoryType: public.app-category.utilities
+        NSPrincipalClass: NSApplication
+        NSSystemExtensionUsageDescription: "YAS uses a network filter extension to show which apps connect to the internet and to block the connections you choose."
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gful.yas
+        PRODUCT_NAME: YAS
+        # Not sandboxed: distributed outside the Mac App Store (Developer ID),
+        # and it installs/controls a system extension. The extension itself
+        # IS sandboxed.
+        ENABLE_APP_SANDBOX: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+        SWIFT_EMIT_LOC_STRINGS: YES
+
+  YASFilter:
+    type: system-extension
+    platform: macOS
+    sources:
+      - path: YASFilter
+    dependencies:
+      - package: YASShared
+        product: YASShared
+      - sdk: NetworkExtension.framework
+    entitlements:
+      path: YASFilter/YASFilter.entitlements
+      properties:
+        com.apple.developer.networking.networkextension:
+          - content-filter-provider-systemextension
+        com.apple.security.application-groups:
+          - group.com.gful.yas
+        com.apple.security.app-sandbox: true
+    info:
+      path: YASFilter/Info.plist
+      properties:
+        CFBundleDisplayName: YASFilter
+        CFBundleName: "$(PRODUCT_NAME)"
+        CFBundlePackageType: "$(PRODUCT_BUNDLE_PACKAGE_TYPE)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSMinimumSystemVersion: "14.0"
+        NSSystemExtensionUsageDescription: "YAS uses a network filter extension to show which apps connect to the internet and to block the connections you choose."
+        NetworkExtension:
+          # Must start with the App Group ID.
+          NEMachServiceName: group.com.gful.yas.filter.xpc
+          NEProviderClasses:
+            com.apple.networkextension.filter-data: "$(PRODUCT_MODULE_NAME).FilterDataProvider"
+    settings:
+      base:
+        # Must be prefixed by the app's bundle ID.
+        PRODUCT_BUNDLE_IDENTIFIER: com.gful.yas.filter
+        PRODUCT_NAME: com.gful.yas.filter
+        PRODUCT_MODULE_NAME: YASFilter
+        ENABLE_APP_SANDBOX: YES
+        SKIP_INSTALL: YES
+
+  YASTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: YASTests
+    dependencies:
+      - target: YAS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gful.yas.tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/YAS.app/Contents/MacOS/YAS"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+schemes:
+  YAS:
+    build:
+      targets:
+        YAS: all
+        YASTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - YASTests
+    archive:
+      config: Release
